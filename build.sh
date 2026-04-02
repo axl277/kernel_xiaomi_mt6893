@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# Compile script for Hydrogen kernel
+# Compile script for AxlKernel
 # Brought to you by rio004
 #
 
@@ -33,7 +33,7 @@ for arg in "$@"; do
     case $arg in
         -c) CLEAN_BUILD=true ;;
         -ksu) INCLUDE_KSU=true
-             ZIPNAME="HydrogenKernel-KSU-${DEVICE}-${DATE}.zip"
+             ZIPNAME="AxlKernel-KSU-${DEVICE}-${DATE}.zip"
              ;;
     esac
 done
