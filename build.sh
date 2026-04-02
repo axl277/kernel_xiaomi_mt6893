@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# Compile script for AxlKernel
+# Compile script for Axlkernel
 # Brought to you by rio004
 #
 
@@ -11,7 +11,7 @@ DATE=$(date '+%Y%m%d-%H%M')
 # Device
 DEVICE="${1:-agate}"
 DEFCONFIG="${DEVICE}_defconfig"
-ZIPNAME="AxlKernel-${DEVICE}-${DATE}.zip"
+ZIPNAME="Axlkernel-${DEVICE}-${DATE}.zip"
 
 echo -e "Building for: $DEVICE\n"
 
@@ -39,9 +39,7 @@ for arg in "$@"; do
 done
 
 [ "$CLEAN_BUILD" = true ] && rm -rf out
-if [ "$INCLUDE_KSU" = true ]; then
-    curl -LSs "https://raw.githubusercontent.com/sukisu-ultra/sukisu-ultra/main/kernel/setup.sh" | bash -s main
-fi
+[ "$INCLUDE_KSU" = true ] && echo "Save your stuff!!" && curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s v0.9.5
 
 # Compilation process
 mkdir -p out
