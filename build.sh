@@ -32,14 +32,10 @@ INCLUDE_KSU=false
 for arg in "$@"; do
     case $arg in
         -c) CLEAN_BUILD=true ;;
-        -ksu) INCLUDE_KSU=true
-             ZIPNAME="AxlKernel-KSU-${DEVICE}-${DATE}.zip"
-             ;;
     esac
 done
 
 [ "$CLEAN_BUILD" = true ] && rm -rf out
-[ "$INCLUDE_KSU" = true ] && echo "Save your stuff!!" && curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s v0.9.5
 
 # Compilation process
 mkdir -p out
@@ -53,10 +49,6 @@ if make -j$(nproc --all) O=out ARCH=arm64 CC="ccache clang" LLVM=1 LLVM_IAS=1 CR
     rm -rf *zip out/arch/arm64/boot
     (cd AnyKernel3 && zip -r9 "../$ZIPNAME" * -x '*.git*' README.md *placeholder)
     rm -rf AnyKernel3
-    if [ "$INCLUDE_KSU" = true ]; then
-        git restore drivers/{Makefile,Kconfig}
-        rm -rf KernelSU drivers/kernelsu
-    fi
     echo -e "\nCompleted in $((SECONDS / 60)) minute(s) and $((SECONDS % 60)) second(s)!"
     echo "Zip: $ZIPNAME"
 else
