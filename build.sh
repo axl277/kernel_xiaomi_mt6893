@@ -128,7 +128,29 @@ echo "[+] Header set_memory.h berhasil dibuat dan diperbarui!"
 # Compilation process
 # ==========================================
 mkdir -p out
+
+# 1. Buat konfigurasi bawaan terlebih dahulu
 make O=out ARCH=arm64 $DEFCONFIG
+
+echo -e "\n[+] Memaksa injeksi dependensi KPM & FTRACE ke dalam .config..."
+
+# 2. Paksa menyalakan semua fitur pelacakan (FTRACE & KALLSYMS) yang dibutuhkan KPM
+cat <<EOF >> out/.config
+CONFIG_EXPERT=y
+CONFIG_DEBUG_KERNEL=y
+CONFIG_FTRACE=y
+CONFIG_DYNAMIC_FTRACE=y
+CONFIG_FUNCTION_TRACER=y
+CONFIG_HAVE_DYNAMIC_FTRACE=y
+CONFIG_KPROBES=y
+CONFIG_KPROBE_EVENTS=y
+CONFIG_KALLSYMS=y
+CONFIG_KALLSYMS_ALL=y
+CONFIG_KPM=y
+EOF
+
+# 3. Kunci konfigurasi yang sudah kita paksa
+make O=out ARCH=arm64 olddefconfig
 
 echo -e "\nStarting compilation...\n"
 if make -j$(nproc --all) O=out ARCH=arm64 CC="ccache clang" LLVM=1 LLVM_IAS=1 CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- Image.gz; then
