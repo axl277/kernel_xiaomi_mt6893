@@ -41,6 +41,16 @@ done
 echo -e "\n[+] Setting up ReSukiSU..."
 curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash
 
+# --- KPM FIX UNTUK KERNEL 4.14 ---
+echo "[+] Menambal super_access.c untuk kompatibilitas Kernel 4.14..."
+SUPER_ACCESS="drivers/kernelsu/kpm/super_access.c"
+if [ -f "$SUPER_ACCESS" ]; then
+    # Menghapus semua baris yang mencoba mengakses array pids[]
+    sed -i '/pids\[/d' "$SUPER_ACCESS"
+    echo "[+] Berhasil menambal KPM super_access.c!"
+fi
+# ---------------------------------
+
 echo "[+] Patching $DEFCONFIG for ReSukiSU (Non-SUSFS) & KPM Support..."
 DEFCONFIG_PATH="arch/arm64/configs/$DEFCONFIG"
 
@@ -84,7 +94,7 @@ int set_memory_rw(unsigned long addr, int numpages);
 int set_memory_x(unsigned long addr, int numpages);
 int set_memory_nx(unsigned long addr, int numpages);
 
-/* Backport untuk KPM di Kernel lawas (menghindari undeclared identifier) */
+/* Backport untuk KPM di Kernel lawas (menghindari undeclared identifier di vmalloc) */
 static inline int set_direct_map_invalid_noflush(struct page *page)
 {
     return 0;
@@ -108,6 +118,7 @@ cat << 'EOF' > include/linux/set_memory.h
 #endif
 EOF
 
+echo "[+] EXPORT_SYMBOL_GPL untuk pageattr.c sudah dilakukan secara manual di source code."
 echo "[+] Header set_memory.h berhasil dibuat dan diperbarui!"
 # --- Selesai KPM Backport ---
 # ==========================================
