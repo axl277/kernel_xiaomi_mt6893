@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# Compile script for Axlkernel with ReSukiSU and KPM Support (Hardcore Mode)
+# Compile script for Axlkernel with ReSukiSU and KPM Support (GOD MODE)
 #
 
 # Date/Time
@@ -36,29 +36,35 @@ done
 [ "$CLEAN_BUILD" = true ] && rm -rf out
 
 # ==========================================
-# ReSukiSU Setup
+# ReSukiSU Setup & Bypass
 # ==========================================
 echo -e "\n[+] Setting up ReSukiSU..."
 curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash
 
-# --- KPM FIX UNTUK KERNEL 4.14 ---
-echo "[+] Menambal super_access.c untuk kompatibilitas Kernel 4.14..."
+echo "[+] Menambal KPM untuk kompatibilitas Kernel 4.14..."
 SUPER_ACCESS="drivers/kernelsu/kpm/super_access.c"
 if [ -f "$SUPER_ACCESS" ]; then
     sed -i '/pids\[/d' "$SUPER_ACCESS"
+fi
+
+# [TRIK ULTIMATE]: Paksa Makefile SukiSU untuk mengcompile KPM asli, bukan Stub!
+KSU_MAKEFILE="drivers/kernelsu/Makefile"
+if [ -f "$KSU_MAKEFILE" ]; then
+    # Ubah syarat kompilasi KPM agar selalu mengikuti status KSU (yang pasti nyala)
+    sed -i 's/CONFIG_KPM/CONFIG_KSU/g' "$KSU_MAKEFILE"
+    # Suntikkan variabel KPM langsung ke compiler
+    sed -i '1i ccflags-y += -DCONFIG_KPM=1' "$KSU_MAKEFILE"
+    echo "[+] Berhasil mem-bypass Makefile ReSukiSU agar KPM tidak jadi cangkang kosong!"
 fi
 # ---------------------------------
 
 echo "[+] Patching $DEFCONFIG for ReSukiSU (Non-SUSFS) & KPM Support..."
 DEFCONFIG_PATH="arch/arm64/configs/$DEFCONFIG"
 
-# Bersihkan config lama jika ada
 sed -i '/CONFIG_KSU/d' "$DEFCONFIG_PATH"
 sed -i '/CONFIG_KPM/d' "$DEFCONFIG_PATH"
 
-# Tambahkan Config ReSukiSU
 cat <<EOF >> "$DEFCONFIG_PATH"
-
 # ReSukiSU
 CONFIG_KSU=y
 CONFIG_KSU_MANUAL_HOOK=y
@@ -72,7 +78,7 @@ CONFIG_KPROBES=y
 CONFIG_HAVE_KPROBES=y
 CONFIG_KPROBE_EVENTS=y
 
-# KPM & Ftrace (Wajib)
+# KPM & Ftrace
 CONFIG_KALLSYMS=y
 CONFIG_KALLSYMS_ALL=y
 CONFIG_EXPERT=y
@@ -81,11 +87,9 @@ CONFIG_FTRACE=y
 CONFIG_DYNAMIC_FTRACE=y
 CONFIG_FUNCTION_TRACER=y
 CONFIG_HAVE_DYNAMIC_FTRACE=y
-CONFIG_KPM=y
 EOF
 
 # --- KPM Backport (Membuat header set_memory.h) ---
-echo -e "\n[+] Menerapkan backport header set_memory.h untuk KPM..."
 mkdir -p arch/arm64/include/asm
 cat << 'EOF' > arch/arm64/include/asm/set_memory.h
 #ifndef _ASM_ARM64_SET_MEMORY_H
@@ -114,14 +118,7 @@ EOF
 # ==========================================
 mkdir -p out
 
-# Paksa GCC untuk menganggap CONFIG_KPM selalu menyala (Bypass Kconfig)
-echo -e "\n[+] Memaksa Makefile untuk mendefinisikan CONFIG_KPM..."
-if ! grep -q "CONFIG_KPM=y" drivers/kernelsu/Makefile; then
-    sed -i '1i ccflags-y += -DCONFIG_KPM=1' drivers/kernelsu/Makefile
-fi
-
-# 4. FIX BUG BAWAAN KERNEL XIAOMI PADA FTRACE
-echo -e "\n[+] Menambal bug redefinition di trace_event_perf.c..."
+# FIX BUG BAWAAN KERNEL XIAOMI PADA FTRACE
 TRACE_PERF="kernel/trace/trace_event_perf.c"
 if [ -f "$TRACE_PERF" ]; then
     sed -i '432d' "$TRACE_PERF"
