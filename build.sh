@@ -25,21 +25,15 @@ if [ ! -d "$TC_DIR" ]; then
 fi
 export PATH="$TC_DIR/bin:$PATH"
 
-# Process options
-CLEAN_BUILD=false
-for arg in "$@"; do
-    case $arg in
-        -c) CLEAN_BUILD=true ;;
-    esac
-done
-
-[ "$CLEAN_BUILD" = true ] && rm -rf out
+# Bersihkan sisa build lama secara total
+echo -e "\n[+] Membersihkan sisa build lama..."
+rm -rf out
+make mrproper
 
 # ===================================================
 # [ OTOMATISASI RESUKISU & SUSFS ]
 # ===================================================
 echo -e "\n[+] Mengunduh dan Menyiapkan ReSukiSU..."
-# Pastikan clone fresh ReSukiSU
 rm -rf KernelSU
 curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash
 
@@ -50,15 +44,12 @@ git clone --depth=1 https://gitlab.com/simonpunk/susfs4ksu.git
 mkdir -p fs/
 mkdir -p include/linux/
 
-# Salin fs dari SUSFS
 cp -rf susfs4ksu/kernel_patches/fs/* fs/
 
-# Menggunakan file header SUSFS versi terbaru yang kompatibel dengan ReSukiSU (mengandung SUSFS_MAGIC dll)
-echo "[+] Mengunduh file header SUSFS terbaru..."
+# Ambil header versi terbaru
 curl -LSs -o include/linux/susfs_def.h "https://gitlab.com/simonpunk/susfs4ksu/-/raw/gki-android14-6.1/kernel_patches/include/linux/susfs_def.h"
 curl -LSs -o include/linux/susfs.h "https://gitlab.com/simonpunk/susfs4ksu/-/raw/gki-android14-6.1/kernel_patches/include/linux/susfs.h"
 
-# Memastikan definisi SYSCALL_FAMILY ada di susfs.h (untuk compatibility kernel lawas)
 if ! grep -q "SYSCALL_FAMILY" include/linux/susfs.h; then
     cat << 'EOF' >> include/linux/susfs.h
 
@@ -68,19 +59,17 @@ if ! grep -q "SYSCALL_FAMILY" include/linux/susfs.h; then
 EOF
 fi
 
-# Apply Patch SUSFS ke Source Kernel 4.14
-echo "Applying SUSFS Kernel patches..."
+# Apply patch
 patch -p1 < susfs4ksu/kernel_patches/50_add_susfs_in_kernel-4.14.patch || true
 patch -p1 < susfs4ksu/kernel_patches/51_add_susfs_in_fs-4.14.patch || true
-
-# Apply Patch SUSFS ke folder KernelSU (ReSukiSU)
 patch -p1 --dir=KernelSU < susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch || true
 
-# PERBAIKAN: Type casting arg di supercall.c ReSukiSU untuk mengatasi "incompatible pointer types"
-sed -i 's/susfs_add_sus_path(arg)/susfs_add_sus_path((struct st_susfs_sus_path __user *)(*arg))/g' KernelSU/kernel/supercall/supercall.c || true
-sed -i 's/susfs_add_sus_kstat(arg)/susfs_add_sus_kstat((struct st_susfs_sus_kstat __user *)(*arg))/g' KernelSU/kernel/supercall/supercall.c || true
-sed -i 's/susfs_update_sus_kstat(arg)/susfs_update_sus_kstat((struct st_susfs_sus_kstat __user *)(*arg))/g' KernelSU/kernel/supercall/supercall.c || true
-sed -i 's/susfs_set_uname(arg)/susfs_set_uname((struct st_susfs_uname __user *)(*arg))/g' KernelSU/kernel/supercall/supercall.c || true
+# Perbaiki casting pointer SUSFS untuk ReSukiSU v4.1+
+SUPERCALL_FILE="KernelSU/kernel/supercall/supercall.c"
+sed -i 's/susfs_add_sus_path(arg)/susfs_add_sus_path((struct st_susfs_sus_path __user *)arg)/g' "$SUPERCALL_FILE"
+sed -i 's/susfs_add_sus_kstat(arg)/susfs_add_sus_kstat((struct st_susfs_sus_kstat __user *)arg)/g' "$SUPERCALL_FILE"
+sed -i 's/susfs_update_sus_kstat(arg)/susfs_update_sus_kstat((struct st_susfs_sus_kstat __user *)arg)/g' "$SUPERCALL_FILE"
+sed -i 's/susfs_set_uname(arg)/susfs_set_uname((struct st_susfs_uname __user *)arg)/g' "$SUPERCALL_FILE"
 
 echo -e "\n[+] Memasukkan Konfigurasi ke $DEFCONFIG..."
 sed -i '/CONFIG_KSU/d' "arch/arm64/configs/$DEFCONFIG"
@@ -102,7 +91,8 @@ mkdir -p out
 make O=out ARCH=arm64 $DEFCONFIG
 
 echo -e "\nStarting compilation...\n"
-if make -j$(nproc --all) O=out ARCH=arm64 CC="ccache clang" LLVM=1 LLVM_IAS=1 CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- Image.gz; then
+# Menghapus '-j' paralel berlebih pada tahap pertama agar error (jika ada) langsung terlihat jelas
+if make -j4 O=out ARCH=arm64 CC="ccache clang" LLVM=1 LLVM_IAS=1 CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- Image.gz; then
     echo -e "\nKernel compiled successfully! Zipping up...\n"
     git clone -q --depth=1 https://github.com/axl277/AnyKernel3 AnyKernel3
     cp out/arch/arm64/boot/Image.gz AnyKernel3
@@ -112,5 +102,5 @@ if make -j$(nproc --all) O=out ARCH=arm64 CC="ccache clang" LLVM=1 LLVM_IAS=1 CR
     echo -e "\nCompleted in $((SECONDS / 60)) minute(s) and $((SECONDS % 60)) second(s)!"
     echo "Zip: $ZIPNAME"
 else
-    echo -e "\nCompilation failed!"
+    echo -e "\nCompilation failed! Check the error logs above carefully."
 fi
