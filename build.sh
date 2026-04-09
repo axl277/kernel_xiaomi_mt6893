@@ -1,7 +1,6 @@
 #!/bin/bash
 #
 # Compile script for Axlkernel
-# Brought to you by rio004
 #
 
 # Date/Time
@@ -28,7 +27,6 @@ export PATH="$TC_DIR/bin:$PATH"
 
 # Process options
 CLEAN_BUILD=false
-INCLUDE_KSU=false
 for arg in "$@"; do
     case $arg in
         -c) CLEAN_BUILD=true ;;
@@ -36,6 +34,46 @@ for arg in "$@"; do
 done
 
 [ "$CLEAN_BUILD" = true ] && rm -rf out
+
+# ===================================================
+# [ OTOMATISASI RESUKISU & SUSFS ]
+# ===================================================
+echo -e "\n[+] Mengunduh dan Menyiapkan ReSukiSU..."
+curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash
+
+echo -e "\n[+] Menyiapkan SUSFS untuk Kernel 4.14..."
+if [ ! -d "susfs4ksu" ]; then
+    git clone https://gitlab.com/simonpunk/susfs4ksu.git
+    
+    # Salin file header dan fs dari SUSFS
+    cp susfs4ksu/kernel_patches/fs/* fs/
+    cp susfs4ksu/kernel_patches/include/linux/* include/linux/
+    
+    # Apply Patch SUSFS ke Source Kernel 4.14
+    echo "Applying SUSFS Kernel patches..."
+    patch -p1 < susfs4ksu/kernel_patches/50_add_susfs_in_kernel-4.14.patch || true
+    patch -p1 < susfs4ksu/kernel_patches/51_add_susfs_in_fs-4.14.patch || true
+    
+    # Apply Patch SUSFS ke folder KernelSU (ReSukiSU)
+    patch -p1 --dir=KernelSU < susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch || true
+fi
+
+echo -e "\n[+] Memasukkan Konfigurasi ke $DEFCONFIG..."
+# Hapus config lama jika ada agar tidak dobel
+sed -i '/CONFIG_KSU/d' "arch/arm64/configs/$DEFCONFIG"
+
+# Tambahkan konfigurasi ReSukiSU & SUSFS
+cat <<EOF >> "arch/arm64/configs/$DEFCONFIG"
+
+# ReSukiSU & SUSFS Configurations
+CONFIG_KSU=y
+CONFIG_KSU_MANUAL_HOOK=y
+CONFIG_KSU_SUSFS=y
+CONFIG_KSU_MANUAL_HOOK_AUTO_INPUT_HOOK=y
+CONFIG_KSU_MANUAL_HOOK_AUTO_SETUID_HOOK=y
+CONFIG_KSU_MANUAL_HOOK_AUTO_INITRC_HOOK=y
+EOF
+# ===================================================
 
 # Compilation process
 mkdir -p out
