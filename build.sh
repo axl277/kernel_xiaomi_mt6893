@@ -73,6 +73,8 @@ EOF
 # --- Mulai KPM Backport (Membuat header set_memory.h) ---
 echo -e "\n[+] Menerapkan backport header set_memory.h untuk KPM..."
 mkdir -p arch/arm64/include/asm
+
+# Mengisi header asm/set_memory.h dengan deklarasi tambahan
 cat << 'EOF' > arch/arm64/include/asm/set_memory.h
 #ifndef _ASM_ARM64_SET_MEMORY_H
 #define _ASM_ARM64_SET_MEMORY_H
@@ -81,6 +83,17 @@ int set_memory_ro(unsigned long addr, int numpages);
 int set_memory_rw(unsigned long addr, int numpages);
 int set_memory_x(unsigned long addr, int numpages);
 int set_memory_nx(unsigned long addr, int numpages);
+
+/* Backport untuk KPM di Kernel lawas (menghindari undeclared identifier) */
+static inline int set_direct_map_invalid_noflush(struct page *page)
+{
+    return 0;
+}
+
+static inline int set_direct_map_default_noflush(struct page *page)
+{
+    return 0;
+}
 
 #endif
 EOF
@@ -94,7 +107,8 @@ cat << 'EOF' > include/linux/set_memory.h
 
 #endif
 EOF
-echo "[+] Header set_memory.h berhasil dibuat!"
+
+echo "[+] Header set_memory.h berhasil dibuat dan diperbarui!"
 # --- Selesai KPM Backport ---
 # ==========================================
 
