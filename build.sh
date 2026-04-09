@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# Compile script for Axlkernel
+# Compile script for Axlkernel with ReSukiSU & SUSFS
 #
 
 # Date/Time
@@ -42,21 +42,30 @@ echo -e "\n[+] Mengunduh dan Menyiapkan ReSukiSU..."
 curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash
 
 echo -e "\n[+] Menyiapkan SUSFS untuk Kernel 4.14..."
-if [ ! -d "susfs4ksu" ]; then
-    git clone https://gitlab.com/simonpunk/susfs4ksu.git
-    
-    # Salin file header dan fs dari SUSFS
-    cp susfs4ksu/kernel_patches/fs/* fs/
-    cp susfs4ksu/kernel_patches/include/linux/* include/linux/
-    
-    # Apply Patch SUSFS ke Source Kernel 4.14
-    echo "Applying SUSFS Kernel patches..."
-    patch -p1 < susfs4ksu/kernel_patches/50_add_susfs_in_kernel-4.14.patch || true
-    patch -p1 < susfs4ksu/kernel_patches/51_add_susfs_in_fs-4.14.patch || true
-    
-    # Apply Patch SUSFS ke folder KernelSU (ReSukiSU)
-    patch -p1 --dir=KernelSU < susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch || true
-fi
+# Hapus folder lama agar selalu fresh clone
+rm -rf susfs4ksu
+git clone --depth=1 https://gitlab.com/simonpunk/susfs4ksu.git
+
+# Pastikan folder target ada sebelum di-copy
+mkdir -p fs/
+mkdir -p include/linux/
+
+# Salin file header dan fs dari SUSFS secara paksa
+cp -rf susfs4ksu/kernel_patches/fs/* fs/
+cp -rf susfs4ksu/kernel_patches/include/linux/* include/linux/
+
+# [BACKUP] Unduh langsung file header jika proses copy di atas gagal
+curl -LSsO https://gitlab.com/simonpunk/susfs4ksu/-/raw/kernel-4.14/kernel_patches/include/linux/susfs_def.h || true
+curl -LSsO https://gitlab.com/simonpunk/susfs4ksu/-/raw/kernel-4.14/kernel_patches/include/linux/susfs.h || true
+mv susfs*.h include/linux/ 2>/dev/null || true
+
+# Apply Patch SUSFS ke Source Kernel 4.14
+echo "Applying SUSFS Kernel patches..."
+patch -p1 < susfs4ksu/kernel_patches/50_add_susfs_in_kernel-4.14.patch || true
+patch -p1 < susfs4ksu/kernel_patches/51_add_susfs_in_fs-4.14.patch || true
+
+# Apply Patch SUSFS ke folder KernelSU (ReSukiSU)
+patch -p1 --dir=KernelSU < susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch || true
 
 echo -e "\n[+] Memasukkan Konfigurasi ke $DEFCONFIG..."
 # Hapus config lama jika ada agar tidak dobel
