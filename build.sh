@@ -152,8 +152,17 @@ EOF
 # 3. Kunci konfigurasi yang sudah kita paksa
 make O=out ARCH=arm64 olddefconfig
 
+# 4. FIX BUG BAWAAN KERNEL XIAOMI PADA FTRACE
+echo -e "\n[+] Menambal bug redefinition di trace_event_perf.c..."
+TRACE_PERF="kernel/trace/trace_event_perf.c"
+if [ -f "$TRACE_PERF" ]; then
+    # Menghapus deklarasi struct perf_event *event; ganda di baris 432
+    sed -i '432d' "$TRACE_PERF"
+fi
+
 echo -e "\nStarting compilation...\n"
-if make -j1 O=out ARCH=arm64 CC="ccache clang" LLVM=1 LLVM_IAS=1 CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- Image.gz; then
+# Boleh kembalikan ke -j$(nproc --all) agar proses kompilasi kembali ngebut
+if make -j$(nproc --all) O=out ARCH=arm64 CC="ccache clang" LLVM=1 LLVM_IAS=1 CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- Image.gz; then
     echo -e "\nKernel compiled successfully! Zipping up...\n"
     git clone -q --depth=1 https://github.com/axl277/AnyKernel3 AnyKernel3
     cp out/arch/arm64/boot/Image.gz AnyKernel3
