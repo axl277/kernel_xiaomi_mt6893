@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# Compile script for Axlkernel
+# Compile script for Axlkernel with ReSukiSU and KPM Support
 #
 
 # Date/Time
@@ -27,42 +27,52 @@ export PATH="$TC_DIR/bin:$PATH"
 
 # Process options
 CLEAN_BUILD=false
-INCLUDE_KSU=false
 for arg in "$@"; do
     case $arg in
         -c) CLEAN_BUILD=true ;;
-        -k) INCLUDE_KSU=true ;; # Argumen untuk memicu instalasi ReSukiSU & KPM
     esac
 done
 
 [ "$CLEAN_BUILD" = true ] && rm -rf out
 
 # ==========================================
-# Integrasi ReSukiSU & KPM Backport
+# ReSukiSU & KPM
 # ==========================================
-if [ "$INCLUDE_KSU" = true ]; then
-    echo -e "\n[+] Mengunduh dan memasang ReSukiSU..."
-    curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash
+echo -e "\n[+] Setting up ReSukiSU..."
+curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash
 
-    echo -e "\n[+] Mengonfigurasi Defconfig untuk KSU dan KPM..."
-    DEFCONFIG_PATH="arch/arm64/configs/$DEFCONFIG"
-    
-    # Menambahkan config KSU dan KPM ke bagian bawah defconfig
-    {
-        echo ""
-        echo "# ReSukiSU & KPM Configuration"
-        echo "CONFIG_KSU=y"
-        echo "CONFIG_KSU_MANUAL_HOOK=y"
-        echo "CONFIG_KPM=y"
-        echo "CONFIG_KALLSYMS=y"
-        echo "CONFIG_KALLSYMS_ALL=y"
-    } >> "$DEFCONFIG_PATH"
+echo "[+] Patching $DEFCONFIG for ReSukiSU (Non-SUSFS) & KPM Support..."
+DEFCONFIG_PATH="arch/arm64/configs/$DEFCONFIG"
 
-    echo -e "\n[+] Menerapkan backport set_memory.h untuk KPM..."
+sed -i '/CONFIG_KSU/d' "$DEFCONFIG_PATH"
+sed -i '/CONFIG_KPM/d' "$DEFCONFIG_PATH"
 
-    # 1. Buat arch/arm64/include/asm/set_memory.h
-    mkdir -p arch/arm64/include/asm
-    cat << 'EOF' > arch/arm64/include/asm/set_memory.h
+# Add ReSukiSU & KPM Configs and Auto-Hooks
+cat <<EOF >> "$DEFCONFIG_PATH"
+
+# ReSukiSU
+CONFIG_KSU=y
+CONFIG_KSU_MANUAL_HOOK=y
+CONFIG_KSU_MANUAL_HOOK_AUTO_SETUID_HOOK=y
+CONFIG_KSU_MANUAL_HOOK_AUTO_INITRC_HOOK=y
+CONFIG_KSU_MANUAL_HOOK_AUTO_INPUT_HOOK=y
+
+# KPM Support (Wajib untuk Non-GKI)
+CONFIG_KPM=y
+CONFIG_KALLSYMS=y
+CONFIG_KALLSYMS_ALL=y
+
+# Kprobes
+CONFIG_MODULES=y
+CONFIG_KPROBES=y
+CONFIG_HAVE_KPROBES=y
+CONFIG_KPROBE_EVENTS=y
+EOF
+
+# --- Mulai KPM Backport untuk Kernel 4.14 ---
+echo -e "\n[+] Menerapkan backport set_memory.h untuk KPM..."
+mkdir -p arch/arm64/include/asm
+cat << 'EOF' > arch/arm64/include/asm/set_memory.h
 #ifndef _ASM_ARM64_SET_MEMORY_H
 #define _ASM_ARM64_SET_MEMORY_H
 
@@ -74,9 +84,8 @@ int set_memory_nx(unsigned long addr, int numpages);
 #endif
 EOF
 
-    # 2. Buat include/linux/set_memory.h
-    mkdir -p include/linux
-    cat << 'EOF' > include/linux/set_memory.h
+mkdir -p include/linux
+cat << 'EOF' > include/linux/set_memory.h
 #ifndef _LINUX_SET_MEMORY_H_
 #define _LINUX_SET_MEMORY_H_
 
@@ -85,27 +94,22 @@ EOF
 #endif
 EOF
 
-    # 3. Export symbol di arch/arm64/mm/pageattr.c agar bisa diakses KPM
-    PAGEATTR="arch/arm64/mm/pageattr.c"
-    if [ -f "$PAGEATTR" ]; then
-        if grep -q "EXPORT_SYMBOL_GPL(set_memory_ro);" "$PAGEATTR"; then
-            echo "[-] pageattr.c sudah di-patch sebelumnya, melewati..."
-        else
-            # Tambahkan include set_memory dan module.h di bagian atas file
-            sed -i '1i #include <linux/module.h>\n#include <asm/set_memory.h>\n' "$PAGEATTR"
-            
-            # Injeksi EXPORT_SYMBOL_GPL untuk masing-masing fungsi
-            sed -i '/int set_memory_ro(unsigned long addr, int numpages)/,/^}/ s/^}/}\nEXPORT_SYMBOL_GPL(set_memory_ro);/' "$PAGEATTR"
-            sed -i '/int set_memory_rw(unsigned long addr, int numpages)/,/^}/ s/^}/}\nEXPORT_SYMBOL_GPL(set_memory_rw);/' "$PAGEATTR"
-            sed -i '/int set_memory_x(unsigned long addr, int numpages)/,/^}/ s/^}/}\nEXPORT_SYMBOL_GPL(set_memory_x);/' "$PAGEATTR"
-            sed -i '/int set_memory_nx(unsigned long addr, int numpages)/,/^}/ s/^}/}\nEXPORT_SYMBOL_GPL(set_memory_nx);/' "$PAGEATTR"
-            echo "[+] Berhasil menambahkan EXPORT_SYMBOL_GPL di pageattr.c"
-        fi
+PAGEATTR="arch/arm64/mm/pageattr.c"
+if [ -f "$PAGEATTR" ]; then
+    if grep -q "EXPORT_SYMBOL_GPL(set_memory_ro);" "$PAGEATTR"; then
+        echo "[-] pageattr.c sudah di-patch sebelumnya, melewati..."
     else
-        echo "[!] PERINGATAN: File $PAGEATTR tidak ditemukan. Pastikan path kernel-mu standar."
+        sed -i '1i #include <linux/module.h>\n#include <asm/set_memory.h>\n' "$PAGEATTR"
+        sed -i '/int set_memory_ro(unsigned long addr, int numpages)/,/^}/ s/^}/}\nEXPORT_SYMBOL_GPL(set_memory_ro);/' "$PAGEATTR"
+        sed -i '/int set_memory_rw(unsigned long addr, int numpages)/,/^}/ s/^}/}\nEXPORT_SYMBOL_GPL(set_memory_rw);/' "$PAGEATTR"
+        sed -i '/int set_memory_x(unsigned long addr, int numpages)/,/^}/ s/^}/}\nEXPORT_SYMBOL_GPL(set_memory_x);/' "$PAGEATTR"
+        sed -i '/int set_memory_nx(unsigned long addr, int numpages)/,/^}/ s/^}/}\nEXPORT_SYMBOL_GPL(set_memory_nx);/' "$PAGEATTR"
+        echo "[+] Berhasil menambahkan EXPORT_SYMBOL_GPL di pageattr.c"
     fi
-    echo "[+] Selesai menerapkan KPM Backport!"
+else
+    echo "[!] PERINGATAN: File $PAGEATTR tidak ditemukan!"
 fi
+# --- Selesai KPM Backport ---
 # ==========================================
 
 # Compilation process
