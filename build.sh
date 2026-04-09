@@ -36,7 +36,7 @@ done
 [ "$CLEAN_BUILD" = true ] && rm -rf out
 
 # ==========================================
-# ReSukiSU & KPM
+# ReSukiSU & KPM Setup
 # ==========================================
 echo -e "\n[+] Setting up ReSukiSU..."
 curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash
@@ -44,10 +44,11 @@ curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup
 echo "[+] Patching $DEFCONFIG for ReSukiSU (Non-SUSFS) & KPM Support..."
 DEFCONFIG_PATH="arch/arm64/configs/$DEFCONFIG"
 
+# Bersihkan config lama jika ada agar tidak dobel
 sed -i '/CONFIG_KSU/d' "$DEFCONFIG_PATH"
 sed -i '/CONFIG_KPM/d' "$DEFCONFIG_PATH"
 
-# Add ReSukiSU & KPM Configs and Auto-Hooks
+# Tambahkan Config ReSukiSU & KPM
 cat <<EOF >> "$DEFCONFIG_PATH"
 
 # ReSukiSU
@@ -57,20 +58,20 @@ CONFIG_KSU_MANUAL_HOOK_AUTO_SETUID_HOOK=y
 CONFIG_KSU_MANUAL_HOOK_AUTO_INITRC_HOOK=y
 CONFIG_KSU_MANUAL_HOOK_AUTO_INPUT_HOOK=y
 
-# KPM Support (Wajib untuk Non-GKI)
+# KPM Support (Wajib untuk Kernel Non-GKI)
 CONFIG_KPM=y
 CONFIG_KALLSYMS=y
 CONFIG_KALLSYMS_ALL=y
 
-# Kprobes
+# Kprobes (Dibutuhkan oleh sistem ReSukiSU)
 CONFIG_MODULES=y
 CONFIG_KPROBES=y
 CONFIG_HAVE_KPROBES=y
 CONFIG_KPROBE_EVENTS=y
 EOF
 
-# --- Mulai KPM Backport untuk Kernel 4.14 ---
-echo -e "\n[+] Menerapkan backport set_memory.h untuk KPM..."
+# --- Mulai KPM Backport (Membuat header set_memory.h) ---
+echo -e "\n[+] Menerapkan backport header set_memory.h untuk KPM..."
 mkdir -p arch/arm64/include/asm
 cat << 'EOF' > arch/arm64/include/asm/set_memory.h
 #ifndef _ASM_ARM64_SET_MEMORY_H
@@ -93,26 +94,14 @@ cat << 'EOF' > include/linux/set_memory.h
 
 #endif
 EOF
-
-PAGEATTR="arch/arm64/mm/pageattr.c"
-if [ -f "$PAGEATTR" ]; then
-    if grep -q "EXPORT_SYMBOL_GPL(set_memory_ro);" "$PAGEATTR"; then
-        echo "[-] pageattr.c sudah di-patch sebelumnya, melewati..."
-    else
-        sed -i '1i #include <linux/module.h>\n#include <asm/set_memory.h>\n' "$PAGEATTR"
-        sed -i '/int set_memory_ro(unsigned long addr, int numpages)/,/^}/ s/^}/}\nEXPORT_SYMBOL_GPL(set_memory_ro);/' "$PAGEATTR"
-        sed -i '/int set_memory_rw(unsigned long addr, int numpages)/,/^}/ s/^}/}\nEXPORT_SYMBOL_GPL(set_memory_rw);/' "$PAGEATTR"
-        sed -i '/int set_memory_x(unsigned long addr, int numpages)/,/^}/ s/^}/}\nEXPORT_SYMBOL_GPL(set_memory_x);/' "$PAGEATTR"
-        sed -i '/int set_memory_nx(unsigned long addr, int numpages)/,/^}/ s/^}/}\nEXPORT_SYMBOL_GPL(set_memory_nx);/' "$PAGEATTR"
-        echo "[+] Berhasil menambahkan EXPORT_SYMBOL_GPL di pageattr.c"
-    fi
-else
-    echo "[!] PERINGATAN: File $PAGEATTR tidak ditemukan!"
-fi
+echo "[+] Header set_memory.h berhasil dibuat!"
 # --- Selesai KPM Backport ---
 # ==========================================
 
+
+# ==========================================
 # Compilation process
+# ==========================================
 mkdir -p out
 make O=out ARCH=arm64 $DEFCONFIG
 
@@ -128,4 +117,5 @@ if make -j$(nproc --all) O=out ARCH=arm64 CC="ccache clang" LLVM=1 LLVM_IAS=1 CR
     echo "Zip: $ZIPNAME"
 else
     echo -e "\nCompilation failed!"
+    exit 1
 fi
