@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# Compile script for Axlkernel with ReSukiSU & SUSFS
+# Compile script for Axlkernel
 #
 
 # Date/Time
@@ -25,74 +25,95 @@ if [ ! -d "$TC_DIR" ]; then
 fi
 export PATH="$TC_DIR/bin:$PATH"
 
-# Bersihkan sisa build lama secara total
-echo -e "\n[+] Membersihkan sisa build lama..."
-rm -rf out
-make mrproper
+# Process options
+CLEAN_BUILD=false
+INCLUDE_KSU=false
+for arg in "$@"; do
+    case $arg in
+        -c) CLEAN_BUILD=true ;;
+        -k) INCLUDE_KSU=true ;; # Argumen untuk memicu instalasi ReSukiSU & KPM
+    esac
+done
 
-# ===================================================
-# [ OTOMATISASI RESUKISU & SUSFS ]
-# ===================================================
-echo -e "\n[+] Mengunduh dan Menyiapkan ReSukiSU..."
-rm -rf KernelSU
-curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash
+[ "$CLEAN_BUILD" = true ] && rm -rf out
 
-echo -e "\n[+] Menyiapkan SUSFS untuk Kernel 4.14..."
-rm -rf susfs4ksu
-git clone --depth=1 https://gitlab.com/simonpunk/susfs4ksu.git
+# ==========================================
+# Integrasi ReSukiSU & KPM Backport
+# ==========================================
+if [ "$INCLUDE_KSU" = true ]; then
+    echo -e "\n[+] Mengunduh dan memasang ReSukiSU..."
+    curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash
 
-mkdir -p fs/
-mkdir -p include/linux/
+    echo -e "\n[+] Mengonfigurasi Defconfig untuk KSU dan KPM..."
+    DEFCONFIG_PATH="arch/arm64/configs/$DEFCONFIG"
+    
+    # Menambahkan config KSU dan KPM ke bagian bawah defconfig
+    {
+        echo ""
+        echo "# ReSukiSU & KPM Configuration"
+        echo "CONFIG_KSU=y"
+        echo "CONFIG_KSU_MANUAL_HOOK=y"
+        echo "CONFIG_KPM=y"
+        echo "CONFIG_KALLSYMS=y"
+        echo "CONFIG_KALLSYMS_ALL=y"
+    } >> "$DEFCONFIG_PATH"
 
-cp -rf susfs4ksu/kernel_patches/fs/* fs/
+    echo -e "\n[+] Menerapkan backport set_memory.h untuk KPM..."
 
-# Ambil header versi terbaru
-curl -LSs -o include/linux/susfs_def.h "https://gitlab.com/simonpunk/susfs4ksu/-/raw/gki-android14-6.1/kernel_patches/include/linux/susfs_def.h"
-curl -LSs -o include/linux/susfs.h "https://gitlab.com/simonpunk/susfs4ksu/-/raw/gki-android14-6.1/kernel_patches/include/linux/susfs.h"
+    # 1. Buat arch/arm64/include/asm/set_memory.h
+    mkdir -p arch/arm64/include/asm
+    cat << 'EOF' > arch/arm64/include/asm/set_memory.h
+#ifndef _ASM_ARM64_SET_MEMORY_H
+#define _ASM_ARM64_SET_MEMORY_H
 
-if ! grep -q "SYSCALL_FAMILY" include/linux/susfs.h; then
-    cat << 'EOF' >> include/linux/susfs.h
+int set_memory_ro(unsigned long addr, int numpages);
+int set_memory_rw(unsigned long addr, int numpages);
+int set_memory_x(unsigned long addr, int numpages);
+int set_memory_nx(unsigned long addr, int numpages);
 
-#ifndef SYSCALL_FAMILY_ALL_ENOENT
-#define SYSCALL_FAMILY_ALL_ENOENT 1
 #endif
 EOF
-fi
 
-# Apply patch
-patch -p1 < susfs4ksu/kernel_patches/50_add_susfs_in_kernel-4.14.patch || true
-patch -p1 < susfs4ksu/kernel_patches/51_add_susfs_in_fs-4.14.patch || true
-patch -p1 --dir=KernelSU < susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch || true
+    # 2. Buat include/linux/set_memory.h
+    mkdir -p include/linux
+    cat << 'EOF' > include/linux/set_memory.h
+#ifndef _LINUX_SET_MEMORY_H_
+#define _LINUX_SET_MEMORY_H_
 
-# Perbaiki casting pointer SUSFS untuk ReSukiSU v4.1+
-SUPERCALL_FILE="KernelSU/kernel/supercall/supercall.c"
-sed -i 's/susfs_add_sus_path(arg)/susfs_add_sus_path((struct st_susfs_sus_path __user *)arg)/g' "$SUPERCALL_FILE"
-sed -i 's/susfs_add_sus_kstat(arg)/susfs_add_sus_kstat((struct st_susfs_sus_kstat __user *)arg)/g' "$SUPERCALL_FILE"
-sed -i 's/susfs_update_sus_kstat(arg)/susfs_update_sus_kstat((struct st_susfs_sus_kstat __user *)arg)/g' "$SUPERCALL_FILE"
-sed -i 's/susfs_set_uname(arg)/susfs_set_uname((struct st_susfs_uname __user *)arg)/g' "$SUPERCALL_FILE"
+#include <asm/set_memory.h>
 
-echo -e "\n[+] Memasukkan Konfigurasi ke $DEFCONFIG..."
-sed -i '/CONFIG_KSU/d' "arch/arm64/configs/$DEFCONFIG"
-
-cat <<EOF >> "arch/arm64/configs/$DEFCONFIG"
-
-# ReSukiSU & SUSFS Configurations
-CONFIG_KSU=y
-CONFIG_KSU_MANUAL_HOOK=y
-CONFIG_KSU_SUSFS=y
-CONFIG_KSU_MANUAL_HOOK_AUTO_INPUT_HOOK=y
-CONFIG_KSU_MANUAL_HOOK_AUTO_SETUID_HOOK=y
-CONFIG_KSU_MANUAL_HOOK_AUTO_INITRC_HOOK=y
+#endif
 EOF
-# ===================================================
+
+    # 3. Export symbol di arch/arm64/mm/pageattr.c agar bisa diakses KPM
+    PAGEATTR="arch/arm64/mm/pageattr.c"
+    if [ -f "$PAGEATTR" ]; then
+        if grep -q "EXPORT_SYMBOL_GPL(set_memory_ro);" "$PAGEATTR"; then
+            echo "[-] pageattr.c sudah di-patch sebelumnya, melewati..."
+        else
+            # Tambahkan include set_memory dan module.h di bagian atas file
+            sed -i '1i #include <linux/module.h>\n#include <asm/set_memory.h>\n' "$PAGEATTR"
+            
+            # Injeksi EXPORT_SYMBOL_GPL untuk masing-masing fungsi
+            sed -i '/int set_memory_ro(unsigned long addr, int numpages)/,/^}/ s/^}/}\nEXPORT_SYMBOL_GPL(set_memory_ro);/' "$PAGEATTR"
+            sed -i '/int set_memory_rw(unsigned long addr, int numpages)/,/^}/ s/^}/}\nEXPORT_SYMBOL_GPL(set_memory_rw);/' "$PAGEATTR"
+            sed -i '/int set_memory_x(unsigned long addr, int numpages)/,/^}/ s/^}/}\nEXPORT_SYMBOL_GPL(set_memory_x);/' "$PAGEATTR"
+            sed -i '/int set_memory_nx(unsigned long addr, int numpages)/,/^}/ s/^}/}\nEXPORT_SYMBOL_GPL(set_memory_nx);/' "$PAGEATTR"
+            echo "[+] Berhasil menambahkan EXPORT_SYMBOL_GPL di pageattr.c"
+        fi
+    else
+        echo "[!] PERINGATAN: File $PAGEATTR tidak ditemukan. Pastikan path kernel-mu standar."
+    fi
+    echo "[+] Selesai menerapkan KPM Backport!"
+fi
+# ==========================================
 
 # Compilation process
 mkdir -p out
 make O=out ARCH=arm64 $DEFCONFIG
 
 echo -e "\nStarting compilation...\n"
-# Menghapus '-j' paralel berlebih pada tahap pertama agar error (jika ada) langsung terlihat jelas
-if make -j4 O=out ARCH=arm64 CC="ccache clang" LLVM=1 LLVM_IAS=1 CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- Image.gz; then
+if make -j$(nproc --all) O=out ARCH=arm64 CC="ccache clang" LLVM=1 LLVM_IAS=1 CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- Image.gz; then
     echo -e "\nKernel compiled successfully! Zipping up...\n"
     git clone -q --depth=1 https://github.com/axl277/AnyKernel3 AnyKernel3
     cp out/arch/arm64/boot/Image.gz AnyKernel3
@@ -102,5 +123,5 @@ if make -j4 O=out ARCH=arm64 CC="ccache clang" LLVM=1 LLVM_IAS=1 CROSS_COMPILE=a
     echo -e "\nCompleted in $((SECONDS / 60)) minute(s) and $((SECONDS % 60)) second(s)!"
     echo "Zip: $ZIPNAME"
 else
-    echo -e "\nCompilation failed! Check the error logs above carefully."
+    echo -e "\nCompilation failed!"
 fi
