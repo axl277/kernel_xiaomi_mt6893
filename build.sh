@@ -42,36 +42,52 @@ echo -e "\n[+] Mengunduh dan Menyiapkan ReSukiSU..."
 curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash
 
 echo -e "\n[+] Menyiapkan SUSFS untuk Kernel 4.14..."
-# Hapus folder lama agar selalu fresh clone
 rm -rf susfs4ksu
 git clone --depth=1 https://gitlab.com/simonpunk/susfs4ksu.git
 
-# Pastikan folder target ada sebelum di-copy
 mkdir -p fs/
 mkdir -p include/linux/
 
-# Salin file header dan fs dari SUSFS secara paksa
+# Salin file asli dari repository
 cp -rf susfs4ksu/kernel_patches/fs/* fs/
 cp -rf susfs4ksu/kernel_patches/include/linux/* include/linux/
 
-# [BACKUP] Unduh langsung file header jika proses copy di atas gagal
-curl -LSsO https://gitlab.com/simonpunk/susfs4ksu/-/raw/kernel-4.14/kernel_patches/include/linux/susfs_def.h || true
-curl -LSsO https://gitlab.com/simonpunk/susfs4ksu/-/raw/kernel-4.14/kernel_patches/include/linux/susfs.h || true
-mv susfs*.h include/linux/ 2>/dev/null || true
+echo "[+] Memastikan file header SUSFS lengkap..."
+# Jika susfs_def.h hilang dari cabang 4.14, ambil langsung dari Android 14
+if [ ! -f "include/linux/susfs_def.h" ]; then
+    curl -LSs -o include/linux/susfs_def.h "https://gitlab.com/simonpunk/susfs4ksu/-/raw/gki-android14-5.15/kernel_patches/include/linux/susfs_def.h"
+fi
 
-# Apply Patch SUSFS ke Source Kernel 4.14
+# Jika masih kosong, buat secara manual agar tidak fatal
+if [ ! -s "include/linux/susfs_def.h" ] || ! grep -q "SYSCALL_FAMILY" include/linux/susfs_def.h; then
+    cat << 'EOF' > include/linux/susfs_def.h
+#ifndef _SUSFS_DEF_H
+#define _SUSFS_DEF_H
+#define SYSCALL_FAMILY_ALL_ENOENT 1
+#endif
+EOF
+fi
+
+# Injeksi deklarasi ke susfs.h jika file dari 4.14 tidak mendefinisikannya
+if ! grep -q "susfs_sus_path_by_filename" include/linux/susfs.h 2>/dev/null; then
+    cat << 'EOF' >> include/linux/susfs.h
+
+#ifndef SYSCALL_FAMILY_ALL_ENOENT
+#define SYSCALL_FAMILY_ALL_ENOENT 1
+struct filename;
+extern int susfs_sus_path_by_filename(struct filename *fname, int *error, int syscall_family);
+#endif
+EOF
+fi
+
 echo "Applying SUSFS Kernel patches..."
 patch -p1 < susfs4ksu/kernel_patches/50_add_susfs_in_kernel-4.14.patch || true
 patch -p1 < susfs4ksu/kernel_patches/51_add_susfs_in_fs-4.14.patch || true
-
-# Apply Patch SUSFS ke folder KernelSU (ReSukiSU)
 patch -p1 --dir=KernelSU < susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch || true
 
 echo -e "\n[+] Memasukkan Konfigurasi ke $DEFCONFIG..."
-# Hapus config lama jika ada agar tidak dobel
 sed -i '/CONFIG_KSU/d' "arch/arm64/configs/$DEFCONFIG"
 
-# Tambahkan konfigurasi ReSukiSU & SUSFS
 cat <<EOF >> "arch/arm64/configs/$DEFCONFIG"
 
 # ReSukiSU & SUSFS Configurations
