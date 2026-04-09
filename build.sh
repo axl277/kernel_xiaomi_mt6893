@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# Compile script for Axlkernel with ReSukiSU and KPM Support
+# Compile script for Axlkernel with ReSukiSU and KPM Support (Hardcore Mode)
 #
 
 # Date/Time
@@ -36,7 +36,7 @@ done
 [ "$CLEAN_BUILD" = true ] && rm -rf out
 
 # ==========================================
-# ReSukiSU & KPM Setup
+# ReSukiSU Setup
 # ==========================================
 echo -e "\n[+] Setting up ReSukiSU..."
 curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash
@@ -45,20 +45,18 @@ curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup
 echo "[+] Menambal super_access.c untuk kompatibilitas Kernel 4.14..."
 SUPER_ACCESS="drivers/kernelsu/kpm/super_access.c"
 if [ -f "$SUPER_ACCESS" ]; then
-    # Menghapus semua baris yang mencoba mengakses array pids[]
     sed -i '/pids\[/d' "$SUPER_ACCESS"
-    echo "[+] Berhasil menambal KPM super_access.c!"
 fi
 # ---------------------------------
 
 echo "[+] Patching $DEFCONFIG for ReSukiSU (Non-SUSFS) & KPM Support..."
 DEFCONFIG_PATH="arch/arm64/configs/$DEFCONFIG"
 
-# Bersihkan config lama jika ada agar tidak dobel
+# Bersihkan config lama jika ada
 sed -i '/CONFIG_KSU/d' "$DEFCONFIG_PATH"
 sed -i '/CONFIG_KPM/d' "$DEFCONFIG_PATH"
 
-# Tambahkan Config ReSukiSU & KPM
+# Tambahkan Config ReSukiSU
 cat <<EOF >> "$DEFCONFIG_PATH"
 
 # ReSukiSU
@@ -68,43 +66,36 @@ CONFIG_KSU_MANUAL_HOOK_AUTO_SETUID_HOOK=y
 CONFIG_KSU_MANUAL_HOOK_AUTO_INITRC_HOOK=y
 CONFIG_KSU_MANUAL_HOOK_AUTO_INPUT_HOOK=y
 
-# KPM Support (Wajib untuk Kernel Non-GKI)
-CONFIG_KPM=y
-CONFIG_KALLSYMS=y
-CONFIG_KALLSYMS_ALL=y
-
-# Kprobes (Dibutuhkan oleh sistem ReSukiSU)
+# Kprobes
 CONFIG_MODULES=y
 CONFIG_KPROBES=y
 CONFIG_HAVE_KPROBES=y
 CONFIG_KPROBE_EVENTS=y
+
+# KPM & Ftrace (Wajib)
+CONFIG_KALLSYMS=y
+CONFIG_KALLSYMS_ALL=y
+CONFIG_EXPERT=y
+CONFIG_DEBUG_KERNEL=y
+CONFIG_FTRACE=y
+CONFIG_DYNAMIC_FTRACE=y
+CONFIG_FUNCTION_TRACER=y
+CONFIG_HAVE_DYNAMIC_FTRACE=y
+CONFIG_KPM=y
 EOF
 
-# --- Mulai KPM Backport (Membuat header set_memory.h) ---
+# --- KPM Backport (Membuat header set_memory.h) ---
 echo -e "\n[+] Menerapkan backport header set_memory.h untuk KPM..."
 mkdir -p arch/arm64/include/asm
-
-# Mengisi header asm/set_memory.h dengan deklarasi tambahan
 cat << 'EOF' > arch/arm64/include/asm/set_memory.h
 #ifndef _ASM_ARM64_SET_MEMORY_H
 #define _ASM_ARM64_SET_MEMORY_H
-
 int set_memory_ro(unsigned long addr, int numpages);
 int set_memory_rw(unsigned long addr, int numpages);
 int set_memory_x(unsigned long addr, int numpages);
 int set_memory_nx(unsigned long addr, int numpages);
-
-/* Backport untuk KPM di Kernel lawas (menghindari undeclared identifier di vmalloc) */
-static inline int set_direct_map_invalid_noflush(struct page *page)
-{
-    return 0;
-}
-
-static inline int set_direct_map_default_noflush(struct page *page)
-{
-    return 0;
-}
-
+static inline int set_direct_map_invalid_noflush(struct page *page) { return 0; }
+static inline int set_direct_map_default_noflush(struct page *page) { return 0; }
 #endif
 EOF
 
@@ -112,16 +103,10 @@ mkdir -p include/linux
 cat << 'EOF' > include/linux/set_memory.h
 #ifndef _LINUX_SET_MEMORY_H_
 #define _LINUX_SET_MEMORY_H_
-
 #include <asm/set_memory.h>
-
 #endif
 EOF
-
-echo "[+] EXPORT_SYMBOL_GPL untuk pageattr.c sudah dilakukan secara manual di source code."
-echo "[+] Header set_memory.h berhasil dibuat dan diperbarui!"
 # --- Selesai KPM Backport ---
-# ==========================================
 
 
 # ==========================================
@@ -129,39 +114,22 @@ echo "[+] Header set_memory.h berhasil dibuat dan diperbarui!"
 # ==========================================
 mkdir -p out
 
-# 1. Buat konfigurasi bawaan terlebih dahulu
-make O=out ARCH=arm64 $DEFCONFIG
-
-echo -e "\n[+] Memaksa injeksi dependensi KPM & FTRACE ke dalam .config..."
-
-# 2. Paksa menyalakan semua fitur pelacakan (FTRACE & KALLSYMS) yang dibutuhkan KPM
-cat <<EOF >> out/.config
-CONFIG_EXPERT=y
-CONFIG_DEBUG_KERNEL=y
-CONFIG_FTRACE=y
-CONFIG_DYNAMIC_FTRACE=y
-CONFIG_FUNCTION_TRACER=y
-CONFIG_HAVE_DYNAMIC_FTRACE=y
-CONFIG_KPROBES=y
-CONFIG_KPROBE_EVENTS=y
-CONFIG_KALLSYMS=y
-CONFIG_KALLSYMS_ALL=y
-CONFIG_KPM=y
-EOF
-
-# 3. Kunci konfigurasi yang sudah kita paksa
-make O=out ARCH=arm64 olddefconfig
+# Paksa GCC untuk menganggap CONFIG_KPM selalu menyala (Bypass Kconfig)
+echo -e "\n[+] Memaksa Makefile untuk mendefinisikan CONFIG_KPM..."
+if ! grep -q "CONFIG_KPM=y" drivers/kernelsu/Makefile; then
+    sed -i '1i ccflags-y += -DCONFIG_KPM=1' drivers/kernelsu/Makefile
+fi
 
 # 4. FIX BUG BAWAAN KERNEL XIAOMI PADA FTRACE
 echo -e "\n[+] Menambal bug redefinition di trace_event_perf.c..."
 TRACE_PERF="kernel/trace/trace_event_perf.c"
 if [ -f "$TRACE_PERF" ]; then
-    # Menghapus deklarasi struct perf_event *event; ganda di baris 432
     sed -i '432d' "$TRACE_PERF"
 fi
 
+make O=out ARCH=arm64 $DEFCONFIG
+
 echo -e "\nStarting compilation...\n"
-# Boleh kembalikan ke -j$(nproc --all) agar proses kompilasi kembali ngebut
 if make -j$(nproc --all) O=out ARCH=arm64 CC="ccache clang" LLVM=1 LLVM_IAS=1 CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- Image.gz; then
     echo -e "\nKernel compiled successfully! Zipping up...\n"
     git clone -q --depth=1 https://github.com/axl277/AnyKernel3 AnyKernel3
