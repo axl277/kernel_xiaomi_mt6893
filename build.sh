@@ -1,7 +1,6 @@
 #!/bin/bash
 #
-# Compile script for Axlkernel
-# Brought to you by rio004
+# Compile script for Axlkernel with KernelSU Next Integration
 #
 
 # Date/Time
@@ -28,7 +27,8 @@ export PATH="$TC_DIR/bin:$PATH"
 
 # Process options
 CLEAN_BUILD=false
-INCLUDE_KSU=false
+INCLUDE_KSU=true # Ubah otomatis ke true untuk inject KernelSU Next
+
 for arg in "$@"; do
     case $arg in
         -c) CLEAN_BUILD=true ;;
@@ -36,6 +36,17 @@ for arg in "$@"; do
 done
 
 [ "$CLEAN_BUILD" = true ] && rm -rf out
+
+# --- KERNELSU NEXT SETUP ---
+if [ "$INCLUDE_KSU" = true ]; then
+    echo -e "\nSetting up KernelSU Next for Non-GKI (Legacy)...\n"
+    if [ ! -d "KernelSU-Next" ]; then
+        curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -s legacy
+    else
+        echo "KernelSU-Next already exists. Skipping clone."
+    fi
+fi
+# ----------------------------
 
 # Compilation process
 mkdir -p out
