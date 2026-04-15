@@ -27,7 +27,7 @@ export PATH="$TC_DIR/bin:$PATH"
 
 # Process options
 CLEAN_BUILD=false
-INCLUDE_KSU=true # Ubah otomatis ke true untuk inject KernelSU Next
+INCLUDE_KSU=true
 
 for arg in "$@"; do
     case $arg in
