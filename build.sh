@@ -8,9 +8,9 @@ SECONDS=0
 DATE=$(date '+%Y%m%d-%H%M')
 
 # Device
-DEVICE="${1:-Chopin}"
+DEVICE="${1:-chopin}"
 DEFCONFIG="${DEVICE}_defconfig"
-ZIPNAME="Axlorin-KSUN-OSS-${DEVICE}-${DATE}.zip"
+ZIPNAME="axlorin-ksun-oss-${DEVICE}-${DATE}.zip"
 
 echo -e "Building for: $DEVICE\n"
 
