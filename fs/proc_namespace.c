@@ -1,20 +1,12 @@
 // SPDX-License-Identifier: GPL-2.0
-/*
- * fs/proc_namespace.c - handling of /proc/<pid>/{mounts,mountinfo,mountstats}
- *
- * In fact, that's a piece of procfs; it's *almost* isolated from
- * the rest of fs/proc, but has rather close relationships with
- * fs/namespace.c, thus here instead of fs/proc
- *
- */
 #include <linux/mnt_namespace.h>
 #include <linux/nsproxy.h>
 #include <linux/security.h>
 #include <linux/fs_struct.h>
 #include <linux/sched/task.h>
+#include <linux/susfs.h>
 
-#include "proc/internal.h" /* only for get_proc_task() in ->open() */
-
+#include "proc/internal.h"
 #include "pnode.h"
 #include "internal.h"
 
@@ -55,8 +47,7 @@ static int show_sb_opts(struct seq_file *m, struct super_block *sb)
 
 	for (fs_infop = fs_info; fs_infop->flag; fs_infop++) {
 		if (sb->s_flags & fs_infop->flag)
-			seq_puts(m, fs_infop->str);
-	}
+			seq_puts(m, fs_infop->str);	}
 
 	return security_sb_show_options(m, sb);
 }
@@ -96,11 +87,16 @@ static void show_type(struct seq_file *m, struct super_block *sb)
 
 static int show_vfsmnt(struct seq_file *m, struct vfsmount *mnt)
 {
+#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
+	struct mount *r = container_of(mnt, struct mount, mnt);
+	if (susfs_handle_show_mountinfo(m, mnt) < 0)
+		return 0;
+#else
 	struct proc_mounts *p = m->private;
 	struct mount *r = real_mount(mnt);
+#endif
 	struct path mnt_path = { .dentry = mnt->mnt_root, .mnt = mnt };
-	struct super_block *sb = mnt_path.dentry->d_sb;
-	int err;
+	struct super_block *sb = mnt_path.dentry->d_sb;	int err;
 
 	if (sb->s_op->show_devname) {
 		err = sb->s_op->show_devname(m, mnt_path.dentry);
@@ -110,7 +106,6 @@ static int show_vfsmnt(struct seq_file *m, struct vfsmount *mnt)
 		mangle(m, r->mnt_devname ? r->mnt_devname : "none");
 	}
 	seq_putc(m, ' ');
-	/* mountpoints outside of chroot jail will give SEQ_SKIP on this */
 	err = seq_path_root(m, &mnt_path, &p->root, " \t\n\\");
 	if (err)
 		goto out;
@@ -132,8 +127,14 @@ out:
 
 static int show_mountinfo(struct seq_file *m, struct vfsmount *mnt)
 {
+#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
+	struct mount *r = container_of(mnt, struct mount, mnt);
+	if (susfs_handle_show_mountinfo(m, mnt) < 0)
+		return 0;
+#else
 	struct proc_mounts *p = m->private;
 	struct mount *r = real_mount(mnt);
+#endif
 	struct super_block *sb = mnt->mnt_sb;
 	struct path mnt_path = { .dentry = mnt->mnt_root, .mnt = mnt };
 	int err;
@@ -144,12 +145,10 @@ static int show_mountinfo(struct seq_file *m, struct vfsmount *mnt)
 		err = sb->s_op->show_path(m, mnt->mnt_root);
 		if (err)
 			goto out;
-	} else {
-		seq_dentry(m, mnt->mnt_root, " \t\n\\");
+	} else {		seq_dentry(m, mnt->mnt_root, " \t\n\\");
 	}
 	seq_putc(m, ' ');
 
-	/* mountpoints outside of chroot jail will give SEQ_SKIP on this */
 	err = seq_path_root(m, &mnt_path, &p->root, " \t\n\\");
 	if (err)
 		goto out;
@@ -157,7 +156,6 @@ static int show_mountinfo(struct seq_file *m, struct vfsmount *mnt)
 	seq_puts(m, mnt->mnt_flags & MNT_READONLY ? " ro" : " rw");
 	show_mnt_opts(m, mnt);
 
-	/* Tagged fields ("foo:X" or "bar") */
 	if (IS_MNT_SHARED(r))
 		seq_printf(m, " shared:%i", r->mnt_group_id);
 	if (IS_MNT_SLAVE(r)) {
@@ -170,7 +168,6 @@ static int show_mountinfo(struct seq_file *m, struct vfsmount *mnt)
 	if (IS_MNT_UNBINDABLE(r))
 		seq_puts(m, " unbindable");
 
-	/* Filesystem specific data */
 	seq_puts(m, " - ");
 	show_type(m, sb);
 	seq_putc(m, ' ');
@@ -197,12 +194,10 @@ out:
 static int show_vfsstat(struct seq_file *m, struct vfsmount *mnt)
 {
 	struct proc_mounts *p = m->private;
-	struct mount *r = real_mount(mnt);
-	struct path mnt_path = { .dentry = mnt->mnt_root, .mnt = mnt };
+	struct mount *r = real_mount(mnt);	struct path mnt_path = { .dentry = mnt->mnt_root, .mnt = mnt };
 	struct super_block *sb = mnt_path.dentry->d_sb;
 	int err;
 
-	/* device */
 	if (sb->s_op->show_devname) {
 		seq_puts(m, "device ");
 		err = sb->s_op->show_devname(m, mnt_path.dentry);
@@ -216,19 +211,15 @@ static int show_vfsstat(struct seq_file *m, struct vfsmount *mnt)
 			seq_puts(m, "no device");
 	}
 
-	/* mount point */
 	seq_puts(m, " mounted on ");
-	/* mountpoints outside of chroot jail will give SEQ_SKIP on this */
 	err = seq_path_root(m, &mnt_path, &p->root, " \t\n\\");
 	if (err)
 		goto out;
 	seq_putc(m, ' ');
 
-	/* file system type */
 	seq_puts(m, "with fstype ");
 	show_type(m, sb);
 
-	/* optional statistics */
 	if (sb->s_op->show_stats) {
 		seq_putc(m, ' ');
 		err = sb->s_op->show_stats(m, mnt_path.dentry);
@@ -252,7 +243,6 @@ static int mounts_open_common(struct inode *inode, struct file *file,
 
 	if (!task)
 		goto err;
-
 	task_lock(task);
 	nsp = task->nsproxy;
 	if (!nsp || !nsp->mnt_ns) {
@@ -303,7 +293,6 @@ static int mounts_release(struct inode *inode, struct file *file)
 	put_mnt_ns(p->ns);
 	return seq_release_private(inode, file);
 }
-
 static int mounts_open(struct inode *inode, struct file *file)
 {
 	return mounts_open_common(inode, file, show_vfsmnt);
