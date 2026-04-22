@@ -1,10 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
-/*
- *  linux/fs/stat.c
- *
- *  Copyright (C) 1991, 1992  Linus Torvalds
- */
-
 #include <linux/export.h>
 #include <linux/mm.h>
 #include <linux/errno.h>
@@ -17,19 +10,13 @@
 #include <linux/syscalls.h>
 #include <linux/pagemap.h>
 #include <linux/compat.h>
-
 #include <linux/uaccess.h>
 #include <asm/unistd.h>
 
-/**
- * generic_fillattr - Fill in the basic attributes from the inode struct
- * @inode: Inode to use as the source
- * @stat: Where to fill in the attributes
- *
- * Fill in the basic attributes in the kstat structure from data that's to be
- * found on the VFS inode structure.  This is the default if no getattr inode
- * operation is supplied.
- */
+#ifdef CONFIG_KSU_SUSFS
+#include <linux/susfs.h>
+#endif
+
 void generic_fillattr(struct inode *inode, struct kstat *stat)
 {
 	stat->dev = inode->i_sb->s_dev;
@@ -53,19 +40,6 @@ void generic_fillattr(struct inode *inode, struct kstat *stat)
 }
 EXPORT_SYMBOL(generic_fillattr);
 
-/**
- * vfs_getattr_nosec - getattr without security checks
- * @path: file to get attributes from
- * @stat: structure to return attributes in
- * @request_mask: STATX_xxx flags indicating what the caller wants
- * @query_flags: Query mode (KSTAT_QUERY_FLAGS)
- *
- * Get attributes without calling security_inode_getattr.
- *
- * Currently the only caller other than vfs_getattr is internal to the
- * filehandle lookup code, which uses only the inode number and returns no
- * attributes to any user.  Any other code probably wants vfs_getattr.
- */
 int vfs_getattr_nosec(const struct path *path, struct kstat *stat,
 		      u32 request_mask, unsigned int query_flags)
 {
@@ -73,8 +47,7 @@ int vfs_getattr_nosec(const struct path *path, struct kstat *stat,
 
 	memset(stat, 0, sizeof(*stat));
 	stat->result_mask |= STATX_BASIC_STATS;
-	request_mask &= STATX_ALL;
-	query_flags &= KSTAT_QUERY_FLAGS;
+	request_mask &= STATX_ALL;	query_flags &= KSTAT_QUERY_FLAGS;
 	if (inode->i_op->getattr)
 		return inode->i_op->getattr(path, stat, request_mask,
 					    query_flags);
@@ -84,27 +57,6 @@ int vfs_getattr_nosec(const struct path *path, struct kstat *stat,
 }
 EXPORT_SYMBOL(vfs_getattr_nosec);
 
-/*
- * vfs_getattr - Get the enhanced basic attributes of a file
- * @path: The file of interest
- * @stat: Where to return the statistics
- * @request_mask: STATX_xxx flags indicating what the caller wants
- * @query_flags: Query mode (KSTAT_QUERY_FLAGS)
- *
- * Ask the filesystem for a file's attributes.  The caller must indicate in
- * request_mask and query_flags to indicate what they want.
- *
- * If the file is remote, the filesystem can be forced to update the attributes
- * from the backing store by passing AT_STATX_FORCE_SYNC in query_flags or can
- * suppress the update by passing AT_STATX_DONT_SYNC.
- *
- * Bits must have been set in request_mask to indicate which attributes the
- * caller wants retrieving.  Any such attribute not requested may be returned
- * anyway, but the value may be approximate, and, if remote, may not have been
- * synchronised with the server.
- *
- * 0 will be returned on success, and a -ve error code if unsuccessful.
- */
 int vfs_getattr(const struct path *path, struct kstat *stat,
 		u32 request_mask, unsigned int query_flags)
 {
@@ -117,18 +69,6 @@ int vfs_getattr(const struct path *path, struct kstat *stat,
 }
 EXPORT_SYMBOL(vfs_getattr);
 
-/**
- * vfs_statx_fd - Get the enhanced basic attributes by file descriptor
- * @fd: The file descriptor referring to the file of interest
- * @stat: The result structure to fill in.
- * @request_mask: STATX_xxx flags indicating what the caller wants
- * @query_flags: Query mode (KSTAT_QUERY_FLAGS)
- *
- * This function is a wrapper around vfs_getattr().  The main difference is
- * that it uses a file descriptor to determine the file location.
- *
- * 0 will be returned on success, and a -ve error code if unsuccessful.
- */
 int vfs_statx_fd(unsigned int fd, struct kstat *stat,
 		 u32 request_mask, unsigned int query_flags)
 {
@@ -148,21 +88,6 @@ int vfs_statx_fd(unsigned int fd, struct kstat *stat,
 }
 EXPORT_SYMBOL(vfs_statx_fd);
 
-/**
- * vfs_statx - Get basic and extra attributes by filename
- * @dfd: A file descriptor representing the base dir for a relative filename
- * @filename: The name of the file of interest
- * @flags: Flags to control the query
- * @stat: The result structure to fill in.
- * @request_mask: STATX_xxx flags indicating what the caller wants
- *
- * This function is a wrapper around vfs_getattr().  The main difference is
- * that it uses a filename and base directory to determine the file location.
- * Additionally, the use of AT_SYMLINK_NOFOLLOW in flags will prevent a symlink
- * at the given name from being referenced.
- *
- * 0 will be returned on success, and a -ve error code if unsuccessful.
- */
 int vfs_statx(int dfd, const char __user *filename, int flags,
 	      struct kstat *stat, u32 request_mask)
 {
@@ -171,8 +96,7 @@ int vfs_statx(int dfd, const char __user *filename, int flags,
 	unsigned int lookup_flags = LOOKUP_FOLLOW | LOOKUP_AUTOMOUNT;
 
 	if ((flags & ~(AT_SYMLINK_NOFOLLOW | AT_NO_AUTOMOUNT |
-		       AT_EMPTY_PATH | KSTAT_QUERY_FLAGS)) != 0)
-		return -EINVAL;
+		       AT_EMPTY_PATH | KSTAT_QUERY_FLAGS)) != 0)		return -EINVAL;
 
 	if (flags & AT_SYMLINK_NOFOLLOW)
 		lookup_flags &= ~LOOKUP_FOLLOW;
@@ -200,10 +124,6 @@ EXPORT_SYMBOL(vfs_statx);
 
 #ifdef __ARCH_WANT_OLD_STAT
 
-/*
- * For backward compatibility?  Maybe this should be moved
- * into arch/i386 instead?
- */
 static int cp_old_stat(struct kstat *stat, struct __old_kernel_stat __user * statbuf)
 {
 	static int warncount = 5;
@@ -214,7 +134,6 @@ static int cp_old_stat(struct kstat *stat, struct __old_kernel_stat __user * sta
 		printk(KERN_WARNING "VFS: Warning: %s using old stat() call. Recompile your binary.\n",
 			current->comm);
 	} else if (warncount < 0) {
-		/* it's laughable, but... */
 		warncount = 0;
 	}
 
@@ -226,8 +145,7 @@ static int cp_old_stat(struct kstat *stat, struct __old_kernel_stat __user * sta
 	tmp.st_mode = stat->mode;
 	tmp.st_nlink = stat->nlink;
 	if (tmp.st_nlink != stat->nlink)
-		return -EOVERFLOW;
-	SET_UID(tmp.st_uid, from_kuid_munged(current_user_ns(), stat->uid));
+		return -EOVERFLOW;	SET_UID(tmp.st_uid, from_kuid_munged(current_user_ns(), stat->uid));
 	SET_GID(tmp.st_gid, from_kgid_munged(current_user_ns(), stat->gid));
 	tmp.st_rdev = old_encode_dev(stat->rdev);
 #if BITS_PER_LONG == 32
@@ -277,8 +195,7 @@ SYSCALL_DEFINE2(fstat, unsigned int, fd, struct __old_kernel_stat __user *, stat
 
 	return error;
 }
-
-#endif /* __ARCH_WANT_OLD_STAT */
+#endif
 
 #if BITS_PER_LONG == 32
 #  define choose_32_64(a,b) a
@@ -326,8 +243,7 @@ static int cp_new_stat(struct kstat *stat, struct stat __user *statbuf)
 #endif
 	tmp.st_blocks = stat->blocks;
 	tmp.st_blksize = stat->blksize;
-	return copy_to_user(statbuf,&tmp,sizeof(tmp)) ? -EFAULT : 0;
-}
+	return copy_to_user(statbuf,&tmp,sizeof(tmp)) ? -EFAULT : 0;}
 
 SYSCALL_DEFINE2(newstat, const char __user *, filename,
 		struct stat __user *, statbuf)
@@ -373,6 +289,11 @@ SYSCALL_DEFINE4(newfstatat, int, dfd, const char __user *, filename,
 	error = vfs_fstatat(dfd, filename, &stat, flag);
 	if (error)
 		return error;
+
+#ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
+	if (susfs_handle_kstat(&stat, NULL) < 0)
+		return -ENOENT;#endif
+
 	return cp_new_stat(&stat, statbuf);
 }
 #endif
@@ -405,9 +326,6 @@ retry:
 		struct inode *inode = d_backing_inode(path.dentry);
 
 		error = empty ? -ENOENT : -EINVAL;
-		/*
-		 * AFS mountpoints allow readlink(2) but are not symlinks
-		 */
 		if (d_is_symlink(path.dentry) || inode->i_op->readlink) {
 			error = security_inode_readlink(path.dentry);
 			if (!error) {
@@ -423,7 +341,6 @@ retry:
 	}
 	return error;
 }
-
 SYSCALL_DEFINE3(readlink, const char __user *, path, char __user *, buf,
 		int, bufsiz)
 {
@@ -431,7 +348,6 @@ SYSCALL_DEFINE3(readlink, const char __user *, path, char __user *, buf,
 }
 
 
-/* ---------- LFS-64 ----------- */
 #if defined(__ARCH_WANT_STAT64) || defined(__ARCH_WANT_COMPAT_STAT64)
 
 #ifndef INIT_STRUCT_STAT64_PADDING
@@ -444,7 +360,6 @@ static long cp_new_stat64(struct kstat *stat, struct stat64 __user *statbuf)
 
 	INIT_STRUCT_STAT64_PADDING(tmp);
 #ifdef CONFIG_MIPS
-	/* mips has weird padding, so we don't get 64 bits there */
 	tmp.st_dev = new_encode_dev(stat->dev);
 	tmp.st_rdev = new_encode_dev(stat->rdev);
 #else
@@ -475,8 +390,7 @@ static long cp_new_stat64(struct kstat *stat, struct stat64 __user *statbuf)
 
 SYSCALL_DEFINE2(stat64, const char __user *, filename,
 		struct stat64 __user *, statbuf)
-{
-	struct kstat stat;
+{	struct kstat stat;
 	int error = vfs_stat(filename, &stat);
 
 	if (!error)
@@ -519,13 +433,12 @@ SYSCALL_DEFINE4(fstatat64, int, dfd, const char __user *, filename,
 		return error;
 	return cp_new_stat64(&stat, statbuf);
 }
-#endif /* __ARCH_WANT_STAT64 || __ARCH_WANT_COMPAT_STAT64 */
+#endif
 
 static noinline_for_stack int
 cp_statx(const struct kstat *stat, struct statx __user *buffer)
 {
 	struct statx tmp;
-
 	memset(&tmp, 0, sizeof(tmp));
 
 	tmp.stx_mask = stat->result_mask;
@@ -555,17 +468,6 @@ cp_statx(const struct kstat *stat, struct statx __user *buffer)
 	return copy_to_user(buffer, &tmp, sizeof(tmp)) ? -EFAULT : 0;
 }
 
-/**
- * sys_statx - System call to get enhanced stats
- * @dfd: Base directory to pathwalk from *or* fd to stat.
- * @filename: File to stat or "" with AT_EMPTY_PATH
- * @flags: AT_* flags to control pathwalk.
- * @mask: Parts of statx struct actually required.
- * @buffer: Result buffer.
- *
- * Note that fstat() can be emulated by setting dfd to the fd of interest,
- * supplying "" as the filename and setting AT_EMPTY_PATH in the flags.
- */
 SYSCALL_DEFINE5(statx,
 		int, dfd, const char __user *, filename, unsigned, flags,
 		unsigned int, mask,
@@ -586,8 +488,7 @@ SYSCALL_DEFINE5(statx,
 	return cp_statx(&stat, buffer);
 }
 
-#ifdef CONFIG_COMPAT
-static int cp_compat_stat(struct kstat *stat, struct compat_stat __user *ubuf)
+#ifdef CONFIG_COMPATstatic int cp_compat_stat(struct kstat *stat, struct compat_stat __user *ubuf)
 {
 	struct compat_stat tmp;
 
@@ -636,8 +537,7 @@ COMPAT_SYSCALL_DEFINE2(newstat, const char __user *, filename,
 
 COMPAT_SYSCALL_DEFINE2(newlstat, const char __user *, filename,
 		       struct compat_stat __user *, statbuf)
-{
-	struct kstat stat;
+{	struct kstat stat;
 	int error;
 
 	error = vfs_lstat(filename, &stat);
@@ -673,7 +573,6 @@ COMPAT_SYSCALL_DEFINE2(newfstat, unsigned int, fd,
 }
 #endif
 
-/* Caller is here responsible for sufficient locking (ie. inode->i_lock) */
 void __inode_add_bytes(struct inode *inode, loff_t bytes)
 {
 	inode->i_blocks += bytes >> 9;
@@ -687,8 +586,7 @@ void __inode_add_bytes(struct inode *inode, loff_t bytes)
 EXPORT_SYMBOL(__inode_add_bytes);
 
 void inode_add_bytes(struct inode *inode, loff_t bytes)
-{
-	spin_lock(&inode->i_lock);
+{	spin_lock(&inode->i_lock);
 	__inode_add_bytes(inode, bytes);
 	spin_unlock(&inode->i_lock);
 }
@@ -731,8 +629,6 @@ EXPORT_SYMBOL(inode_get_bytes);
 
 void inode_set_bytes(struct inode *inode, loff_t bytes)
 {
-	/* Caller is here responsible for sufficient locking
-	 * (ie. inode->i_lock) */
 	inode->i_blocks = bytes >> 9;
 	inode->i_bytes = bytes & 511;
 }
