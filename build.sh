@@ -1,20 +1,14 @@
 #!/bin/bash
-#
-# Compile script for Axlkernel with KernelSU Next Integration
-#
+set -e
 
-# Date/Time
 SECONDS=0
 DATE=$(date '+%Y%m%d-%H%M')
-
-# Device
 DEVICE="${1:-chopin}"
 DEFCONFIG="${DEVICE}_defconfig"
-ZIPNAME="axlorin-ksun-oss-${DEVICE}-${DATE}.zip"
+ZIPNAME="Axlorin-KernelSUNext-OSS-${DATE}.zip"
 
-echo -e "Building for: $DEVICE\n"
+echo -e "📱 Building for: $DEVICE\n"
 
-# Ensure the toolchain is available
 TC_DIR="$HOME/toolchains/proton-clang"
 CURRENT_DIR=$(pwd)
 if [ ! -d "$TC_DIR" ]; then
@@ -25,9 +19,8 @@ if [ ! -d "$TC_DIR" ]; then
 fi
 export PATH="$TC_DIR/bin:$PATH"
 
-# Process options
 CLEAN_BUILD=false
-INCLUDE_KSU=true
+INCLUDE_ROOT=true
 
 for arg in "$@"; do
     case $arg in
@@ -37,31 +30,32 @@ done
 
 [ "$CLEAN_BUILD" = true ] && rm -rf out
 
-# --- KERNELSU NEXT SETUP ---
-if [ "$INCLUDE_KSU" = true ]; then
-    echo -e "\nSetting up KernelSU Next for Non-GKI (Legacy)...\n"
-    if [ ! -d "KernelSU-Next" ]; then
-        curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -s legacy
-    else
-        echo "KernelSU-Next already exists. Skipping clone."
-    fi
+# ===== KernelSU Next Setup =====
+if [ "$INCLUDE_ROOT" = true ]; then
+    echo -e "\n🔧 Setting up KernelSU Next...\n"
+    curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -s legacy
+    echo -e "✅ Integrated KernelSU Next.\n"
 fi
-# ----------------------------
+# ==================================
 
-# Compilation process
 mkdir -p out
+echo -e "⚙️ Generating defconfig..."
 make O=out ARCH=arm64 $DEFCONFIG
 
-echo -e "\nStarting compilation...\n"
+echo -e "\n🚀 Starting compilation...\n"
 if make -j$(nproc --all) O=out ARCH=arm64 CC="ccache clang" LLVM=1 LLVM_IAS=1 CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- Image.gz; then
-    echo -e "\nKernel compiled successfully! Zipping up...\n"
-    git clone -q --depth=1 https://github.com/axl277/AnyKernel3 AnyKernel3
-    cp out/arch/arm64/boot/Image.gz AnyKernel3
-    rm -rf *zip out/arch/arm64/boot
-    (cd AnyKernel3 && zip -r9 "../$ZIPNAME" * -x '*.git*' README.md *placeholder)
-    rm -rf AnyKernel3
-    echo -e "\nCompleted in $((SECONDS / 60)) minute(s) and $((SECONDS % 60)) second(s)!"
-    echo "Zip: $ZIPNAME"
+    echo -e "\n📦 Packaging...\n"
+    AK3="AnyKernel3"
+    if [ ! -d "$AK3" ]; then
+        git clone -q --depth=1 https://github.com/axl277/AnyKernel3 "$AK3"
+    fi
+    cp out/arch/arm64/boot/Image.gz "$AK3/"
+    rm -rf *.zip
+    (cd "$AK3" && zip -r9 "../$ZIPNAME" * -x '*.git*' README.md *placeholder)
+    rm -rf "$AK3"
+    echo -e "\n✅ Completed in $((SECONDS / 60))m $((SECONDS % 60))s!"
+    echo -e "📄 Zip: $ZIPNAME\n"
 else
-    echo -e "\nCompilation failed!"
+    echo -e "\n❌ Compilation failed!\n"
+    exit 1
 fi
