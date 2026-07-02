@@ -1731,11 +1731,13 @@ cpu_limits_store(struct device *dev,
 		pr_err("input param error, can not prase param\n");
 		return -EINVAL;
 	}
-  	//mt6877: cluster 0: 0-5, cluster 1: 6-7
-	if (cpu >= 0 && cpu <= 5)
+	/* mt6893: cluster 0: 0-3 (little), cluster 1: 4-6 (big), cluster 2: 7 (prime) */
+	if (cpu >= 0 && cpu <= 3)
 		cpu = 0;
-	else if (cpu >= 6 && cpu <= 7)
+	else if (cpu >= 4 && cpu <= 6)
 		cpu = 1;
+	else
+		cpu = 2;
 
 	mt_ppm_sysboost_set_freq_limit(BOOST_BY_XM_THERMAL, cpu, -1, max);
 
