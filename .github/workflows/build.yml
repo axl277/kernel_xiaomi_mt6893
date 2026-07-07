@@ -1,4 +1,4 @@
-name: Build AxlKernel
+name: Build kernel
 on:
   workflow_dispatch:
 
@@ -26,5 +26,5 @@ jobs:
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: Axlorin-ReSukisu-KPatch-Chopin
+          name: Axlorin-OSS
           path: "*.zip"
