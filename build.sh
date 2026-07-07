@@ -5,7 +5,7 @@ SECONDS=0
 DATE=$(date '+%Y%m%d-%H%M')
 DEVICE="${1:-chopin}"
 DEFCONFIG="${DEVICE}_defconfig"
-ZIPNAME="Axlorin-KernelSUNext-OSS-${DATE}.zip"
+ZIPNAME="ArticCore-KernelSUNext-OSS-${DATE}.zip"
 
 echo -e "📱 Building for: $DEVICE\n"
 
