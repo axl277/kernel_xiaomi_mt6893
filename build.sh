@@ -10,7 +10,7 @@ DATE=$(date '+%Y%m%d-%H%M')
 # Device
 DEVICE="${1:-chopin}"
 DEFCONFIG="${DEVICE}_defconfig"
-ZIPNAME="Axlkernel-Resukisu-KPatch-${DEVICE}-${DATE}.zip"
+ZIPNAME="Artic-Core-Resukisu-KPatch-${DEVICE}-${DATE}.zip"
 
 echo -e "Building for: $DEVICE\n"
 
